@@ -1,0 +1,6 @@
+/_build/
+/deps/
+/tmp/
+/.expert/
+.DS_Store
+!/.tool-versions
