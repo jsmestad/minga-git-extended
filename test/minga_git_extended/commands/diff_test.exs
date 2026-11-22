@@ -83,7 +83,11 @@ defmodule MingaGitExtended.CommandsDiffTest do
     view = EditorAPI.active_buffer(shown)
 
     assert {:ok,
-            %Target{origin: %Origin{staged: true}, contents: {@base, nil}, layout: :side_by_side}} =
+            %Target{
+              origin: %Origin{section: :staged},
+              contents: {@base, nil},
+              layout: :side_by_side
+            }} =
              GitDiff.target(shown, view)
 
     blocked = Commands.execute(shown, :git_revert_hunk)
@@ -202,7 +206,7 @@ defmodule MingaGitExtended.CommandsDiffTest do
   test "recreating a deleted worktree path as an empty file invalidates its selected deletion",
        ctx do
     File.rm!(ctx.working_path)
-    origin = %Origin{git_root: ctx.root, rel_path: @path, staged: false}
+    origin = %Origin{git_root: ctx.root, rel_path: @path, section: :unstaged}
     {:ok, shown} = GitDiff.open(TestHelpers.gui_state(), origin, {@base, nil})
     view = EditorAPI.active_buffer(shown)
     File.write!(ctx.working_path, "")
@@ -216,7 +220,7 @@ defmodule MingaGitExtended.CommandsDiffTest do
 
   test "a dangling symlink invalidates a selected worktree deletion without staging it", ctx do
     File.rm!(ctx.working_path)
-    origin = %Origin{git_root: ctx.root, rel_path: @path, staged: false}
+    origin = %Origin{git_root: ctx.root, rel_path: @path, section: :unstaged}
     {:ok, shown} = GitDiff.open(TestHelpers.gui_state(), origin, {@base, nil})
     missing_target = Path.join(ctx.root, "missing.txt")
     File.ln_s!(missing_target, ctx.working_path)
@@ -247,7 +251,7 @@ defmodule MingaGitExtended.CommandsDiffTest do
     origin = %Origin{
       git_root: ctx.root,
       rel_path: @path,
-      staged: false,
+      section: :unstaged,
       source_buffer: ctx.source
     }
 

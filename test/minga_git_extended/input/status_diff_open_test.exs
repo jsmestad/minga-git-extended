@@ -1,6 +1,6 @@
 defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
-  @moduledoc "Tests git status diff opening for staged and deleted entries."
-  # Registers the GitExtended event callback and configures the shared Git stub.
+  @moduledoc "Tests Git status diff opening for staged, deleted, and conflicted entries."
+  # Registers GitExtended callbacks and switches the shared Git backend for the real conflict fixture.
   use ExUnit.Case, async: false
 
   alias Minga.Buffer
@@ -13,10 +13,13 @@ defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Extension.GitDiff
+  alias MingaEditor.Extension.GitDiff.Origin
   alias MingaEditor.Extension.GitDiff.Target
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
+  alias MingaGitExtended.Commands
 
   @source {:extension, :minga_git_extended}
   @admission Module.concat(__MODULE__, Admission)
@@ -128,6 +131,70 @@ defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
 
     assert {:ok, %Target{contents: {"staged\n", "worktree\n"}}} =
              GitDiff.target(changed_state, changed_buf)
+  end
+
+  test "previewing a conflicted entry compares HEAD to the worktree without permitting staging",
+       %{git_root: root, scheduler: scheduler} do
+    path = "conflict.txt"
+    file = Path.join(root, path)
+    ours = "our version\n"
+    previous_backend = Application.fetch_env!(:minga, :git_module)
+    Application.put_env(:minga, :git_module, Minga.Git.System)
+    on_exit(fn -> Application.put_env(:minga, :git_module, previous_backend) end)
+
+    assert {_, 0} = git(root, ["init", "--initial-branch=main", "--template="])
+    File.write!(file, "common ancestor\n")
+    assert {_, 0} = git(root, ["add", "--", path])
+    assert {_, 0} = git(root, ["commit", "-m", "ancestor"])
+    assert {_, 0} = git(root, ["switch", "-c", "other"])
+    File.write!(file, "their version\n")
+    assert {_, 0} = git(root, ["commit", "-am", "other"])
+    assert {_, 0} = git(root, ["switch", "main"])
+    File.write!(file, ours)
+    assert {_, 0} = git(root, ["commit", "-am", "ours"])
+    assert {_, 1} = git(root, ["merge", "other"])
+    assert {:error, reason} = Git.index_blob(root, path)
+    assert reason =~ "unmerged"
+    conflicted = File.read!(file)
+    assert conflicted =~ "<<<<<<<"
+
+    entry = %Git.StatusEntry{path: path, status: :conflict, staged: false}
+    state = state_with_selected_entry(entry, scheduler, root)
+    {:handled, pending} = GitStatus.handle_key(state, ?p, @none)
+    shown = receive_effect(pending, scheduler)
+    view = shown.workspace.buffers.active
+
+    assert Buffer.buffer_name(view) == "conflict.txt [diff:conflict]"
+
+    assert {:ok, %Target{origin: %Origin{section: :conflict}, contents: {^ours, ^conflicted}}} =
+             GitDiff.target(shown, view)
+
+    File.write!(file, ours)
+    assert {_, 0} = git(root, ["add", "--", path])
+    File.write!(file, conflicted)
+
+    blocked = Commands.execute(shown, :git_stage_hunk)
+    assert NoticeWorkflow.message(blocked) == "Cannot stage from a conflict diff view"
+    assert {:ok, ^ours} = Git.index_blob(root, path)
+    assert File.read!(file) == conflicted
+  end
+
+  defp git(root, args) do
+    config = [
+      "-c",
+      "user.name=Minga Test",
+      "-c",
+      "user.email=minga@example.test",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "core.hooksPath=/dev/null"
+    ]
+
+    System.cmd("git", ["-C", root] ++ config ++ args,
+      env: [{"GIT_CONFIG_NOSYSTEM", "1"}, {"GIT_CONFIG_GLOBAL", "/dev/null"}],
+      stderr_to_stdout: true
+    )
   end
 
   defp register_git_diff_callback do

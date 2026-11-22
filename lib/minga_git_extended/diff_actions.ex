@@ -18,6 +18,7 @@ defmodule MingaGitExtended.DiffActions do
   @typep hunk_action :: :stage | :revert | :preview
   @typep direction :: :next | :previous
   @typep status_target :: {String.t(), String.t(), atom(), boolean()}
+  @typep status_comparison :: {String.t(), String.t(), Origin.section()}
   @type command ::
           :git_diff_file
           | :git_diff_toggle_staged
@@ -38,7 +39,7 @@ defmodule MingaGitExtended.DiffActions do
         git_root: file.root,
         rel_path: file.path,
         source_buffer: buffer,
-        staged: false
+        section: :unstaged
       }
 
       case Git.index_blob(file.root, file.path) do
@@ -56,7 +57,8 @@ defmodule MingaGitExtended.DiffActions do
         EditorAPI.notice(state, "Cannot toggle staged: diff opened from status panel")
 
       {:ok, %Target{origin: origin}} ->
-        updated = %{origin | staged: not origin.staged}
+        section = if origin.section == :staged, do: :unstaged, else: :staged
+        updated = %{origin | section: section}
         replace(state, buffer, updated, diff_message(updated))
 
       {:error, {:stale_source, %Target{origin: origin}}} ->
@@ -99,35 +101,53 @@ defmodule MingaGitExtended.DiffActions do
   @doc "Proposes reading the exact status entry outside the editor process."
   @spec propose_status(state(), String.t(), status_target()) ::
           state() | {:schedule, state(), RepositoryJob.t()}
-  def propose_status(state, root, target) do
+  def propose_status(state, root, {path, absolute_path, status, staged?}) do
+    target = {path, absolute_path, status_section(status, staged?)}
+
     case RepositoryJob.propose(state, :diff_open, root, __MODULE__, target) do
       {:ok, job} -> {:schedule, state, job}
       {:error, reason} -> EditorAPI.notice(state, "Git diff not scheduled: #{inspect(reason)}")
     end
   end
 
+  @spec status_section(atom(), boolean()) :: Origin.section()
+  defp status_section(:conflict, _staged?), do: :conflict
+  defp status_section(_status, true), do: :staged
+  defp status_section(_status, false), do: :unstaged
+
   @impl true
-  @spec run(String.t(), status_target()) :: {:ok, Target.contents()} | {:error, String.t()}
-  def run(root, {path, _absolute_path, _status, true}) do
+  @spec run(String.t(), status_comparison()) :: {:ok, Target.contents()} | {:error, String.t()}
+  def run(root, {path, _absolute_path, :staged}) do
     with {:ok, indexed} <- Git.index_blob(root, path) do
       {:ok, {head_content(root, path), indexed}}
     end
   end
 
-  def run(root, {path, absolute_path, _status, false}) do
+  def run(root, {path, absolute_path, :conflict}) do
+    with {:ok, current} <- status_worktree(absolute_path) do
+      {:ok, {head_content(root, path), current}}
+    end
+  end
+
+  def run(root, {path, absolute_path, :unstaged}) do
     with {:ok, indexed} <- Git.index_blob(root, path),
-         {:ok, current} <- read_worktree(absolute_path) do
+         {:ok, current} <- status_worktree(absolute_path) do
       {:ok, {indexed, current}}
-    else
-      {:error, reason} when is_atom(reason) -> {:error, "Could not read file: #{inspect(reason)}"}
-      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec status_worktree(String.t()) :: {:ok, binary() | nil} | {:error, String.t()}
+  defp status_worktree(path) do
+    case read_worktree(path) do
+      {:ok, _content} = result -> result
+      {:error, reason} -> {:error, "Could not read file: #{inspect(reason)}"}
     end
   end
 
   @impl true
-  @spec on_result(state(), String.t(), Handler.outcome(), status_target()) :: state()
-  def on_result(state, root, {:completed, {base, current}}, {path, _absolute, _status, staged}) do
-    open(state, %Origin{git_root: root, rel_path: path, staged: staged}, {base, current})
+  @spec on_result(state(), String.t(), Handler.outcome(), status_comparison()) :: state()
+  def on_result(state, root, {:completed, {base, current}}, {path, _absolute, section}) do
+    open(state, %Origin{git_root: root, rel_path: path, section: section}, {base, current})
   end
 
   def on_result(state, _root, {status, error}, _target) do
@@ -150,8 +170,7 @@ defmodule MingaGitExtended.DiffActions do
   end
 
   @spec diff_message(Origin.t()) :: String.t()
-  defp diff_message(%Origin{rel_path: path, staged: staged}) do
-    section = if staged, do: "staged", else: "unstaged"
+  defp diff_message(%Origin{rel_path: path, section: section}) do
     "Diff (#{section}): #{Path.basename(path)}"
   end
 
@@ -257,9 +276,9 @@ defmodule MingaGitExtended.DiffActions do
   defp apply_source_action(state, _buffer, :preview, _file, change), do: preview(state, change)
 
   @spec view_action(state(), pid(), hunk_action(), Target.t()) :: state()
-  defp view_action(state, _buffer, action, %Target{origin: %Origin{staged: true}})
-       when action in [:stage, :revert],
-       do: EditorAPI.notice(state, "Cannot #{action} from a staged diff view")
+  defp view_action(state, _buffer, action, %Target{origin: %Origin{section: section}})
+       when section in [:staged, :conflict] and action in [:stage, :revert],
+       do: EditorAPI.notice(state, "Cannot #{action} from a #{section} diff view")
 
   defp view_action(state, _buffer, :revert, %Target{origin: %Origin{source_buffer: nil}}),
     do: EditorAPI.notice(state, "Cannot revert: diff opened from status panel")
@@ -365,7 +384,7 @@ defmodule MingaGitExtended.DiffActions do
   @spec replace(state(), pid(), Origin.t(), String.t()) :: state()
   defp replace(state, buffer, origin, notice) do
     with {:ok, contents} <- current_contents(origin),
-         {:ok, updated} <- GitDiff.replace(state, buffer, origin.staged, contents) do
+         {:ok, updated} <- GitDiff.replace(state, buffer, origin.section, contents) do
       EditorAPI.notice(updated, notice)
     else
       {:error, reason} ->
@@ -374,13 +393,13 @@ defmodule MingaGitExtended.DiffActions do
   end
 
   @spec current_contents(Origin.t()) :: {:ok, Target.contents()} | {:error, term()}
-  defp current_contents(%Origin{git_root: root, rel_path: path, staged: true}) do
+  defp current_contents(%Origin{git_root: root, rel_path: path, section: :staged}) do
     with {:ok, indexed} <- Git.index_blob(root, path) do
       {:ok, {head_content(root, path), indexed}}
     end
   end
 
-  defp current_contents(%Origin{git_root: root, rel_path: path} = origin) do
+  defp current_contents(%Origin{git_root: root, rel_path: path, section: :unstaged} = origin) do
     with {:ok, indexed} <- Git.index_blob(root, path),
          {:ok, working} <- working_content(origin) do
       {:ok, {indexed, working}}
