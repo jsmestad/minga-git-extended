@@ -98,10 +98,13 @@ defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
     staged_entry = %Git.StatusEntry{path: rel_path, status: :modified, staged: true}
     changed_entry = %Git.StatusEntry{path: rel_path, status: :modified, staged: false}
 
+    staged = state_with_panel_entries([changed_entry, staged_entry], scheduler, git_root, base)
+    staged_panel_id = SidebarWorkflow.git_status_panel(staged).id
+
     {:noreply, staged_pending} =
       MingaEditor.handle_info(
-        {:minga_input, {:gui_action, {:git_open_diff, rel_path, 0}}},
-        state_with_panel_entries([changed_entry, staged_entry], scheduler, git_root, base)
+        {:minga_input, {:gui_action, {:git_open_diff, staged_panel_id, rel_path, 0}}},
+        staged
       )
 
     staged_state = receive_effect(staged_pending, scheduler)
@@ -110,10 +113,13 @@ defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
     assert buffer_content(staged_buf) =~ "staged"
     refute buffer_content(staged_buf) =~ "worktree"
 
+    changed = state_with_panel_entries([staged_entry, changed_entry], scheduler, git_root, base)
+    changed_panel_id = SidebarWorkflow.git_status_panel(changed).id
+
     {:noreply, changed_pending} =
       MingaEditor.handle_info(
-        {:minga_input, {:gui_action, {:git_open_diff, rel_path, 1}}},
-        state_with_panel_entries([staged_entry, changed_entry], scheduler, git_root, base)
+        {:minga_input, {:gui_action, {:git_open_diff, changed_panel_id, rel_path, 1}}},
+        changed
       )
 
     changed_state = receive_effect(changed_pending, scheduler)
