@@ -1,6 +1,8 @@
 defmodule MingaGitExtended.MixProject do
   use Mix.Project
 
+  @source_url "https://github.com/jsmestad/minga-git-extended"
+
   def project do
     [
       app: :minga_git_extended,
@@ -11,7 +13,13 @@ defmodule MingaGitExtended.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: [test: ["test --no-start --warnings-as-errors"]],
       description: "Git workflows for the Minga editor",
-      source_url: "https://github.com/jsmestad/minga-git-extended"
+      source_url: @source_url,
+      docs: [main: "readme", extras: ["README.md"]],
+      package: [
+        licenses: ["MIT"],
+        links: %{"GitHub" => @source_url},
+        files: ~w(lib mix.exs README.md LICENSE)
+      ]
     ]
   end
 
@@ -30,10 +38,13 @@ defmodule MingaGitExtended.MixProject do
   end
 
   defp deps(_env) do
-    case System.get_env("MINGA_SDK_PATH") do
-      nil -> [{:minga_sdk, "~> 0.1.1", only: :dev, runtime: false}]
-      path -> [{:minga_sdk, path: Path.expand(path), only: :dev, runtime: false}]
-    end
+    sdk =
+      case System.get_env("MINGA_SDK_PATH") do
+        nil -> {:minga_sdk, "~> 0.1.1", only: :dev, runtime: false}
+        path -> {:minga_sdk, path: Path.expand(path), only: :dev, runtime: false}
+      end
+
+    [sdk, {:ex_doc, "~> 0.40", only: :dev, runtime: false}]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
