@@ -1,6 +1,8 @@
 defmodule MingaGitExtended.MixProject do
   use Mix.Project
 
+  @source_url "https://github.com/jsmestad/minga-git-extended"
+
   def project do
     [
       app: :minga_git_extended,
@@ -11,7 +13,12 @@ defmodule MingaGitExtended.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: [test: ["test --no-start --warnings-as-errors"]],
       description: "Git workflows for the Minga editor",
-      source_url: "https://github.com/jsmestad/minga-git-extended"
+      source_url: @source_url,
+      package: [
+        licenses: ["MIT"],
+        links: %{"GitHub" => @source_url},
+        files: ~w(lib mix.exs README.md LICENSE)
+      ]
     ]
   end
 
