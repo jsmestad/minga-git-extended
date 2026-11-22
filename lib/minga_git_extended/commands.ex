@@ -247,6 +247,9 @@ defmodule MingaGitExtended.Commands do
 
       {state, :not_git} ->
         EditorAPI.notice(state, "Not in a git repository")
+
+      {state, :repo_unavailable} ->
+        state
     end
   end
 end

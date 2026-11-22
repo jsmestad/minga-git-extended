@@ -70,6 +70,7 @@ defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
        %{git_root: git_root, scheduler: scheduler} do
     rel_path = "deleted.txt"
     GitStub.set_head(git_root, rel_path, "removed\n")
+    GitStub.set_staged(git_root, rel_path, :deleted)
 
     entry = %Git.StatusEntry{path: rel_path, status: :deleted, staged: true}
     state = state_with_selected_entry(entry, scheduler, git_root)

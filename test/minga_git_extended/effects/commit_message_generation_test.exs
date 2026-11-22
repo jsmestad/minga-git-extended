@@ -2,11 +2,14 @@ defmodule MingaGitExtended.Effects.CommitMessageGenerationTest do
   # The test Git and generator fixtures use a shared process registration.
   use ExUnit.Case, async: false
 
+  alias Minga.Buffer
   alias Minga.Extension.CallbackInvoker
   alias Minga.Extension.CodeLease
+  alias Minga.Git.Stub
   alias Minga.Project.FileTree
   alias MingaEditor.Effect.Outcome
   alias MingaEditor.EffectScheduler
+  alias MingaEditor.Extension.EditorAPI
   alias MingaEditor.Extension.RepositoryJob
   alias MingaEditor.PromptUI
   alias MingaEditor.Session.State, as: SessionState
@@ -39,7 +42,7 @@ defmodule MingaGitExtended.Effects.CommitMessageGenerationTest do
       workspace: %SessionState{}
     }
 
-    %{state: project(state, @root), scheduler: scheduler}
+    %{state: project(state, @root), file_only: state, scheduler: scheduler}
   end
 
   test "reads the captured staged diff in the worker and offers an editable message", %{
@@ -108,6 +111,29 @@ defmodule MingaGitExtended.Effects.CommitMessageGenerationTest do
     refute PromptUI.open?(finished)
   end
 
+  @tag :tmp_dir
+  test "changing the active file to another repository discards a file-only result", ctx do
+    first_root = Path.join(ctx.tmp_dir, "repo-a")
+    second_root = Path.join(ctx.tmp_dir, "repo-b")
+    first = repository_file(first_root)
+    second = repository_file(second_root)
+    {state, _registration} = EditorState.register_buffer(ctx.file_only, first, :open)
+    assert EditorAPI.project_root(state) == nil
+    assert EditorAPI.git_root(state) == {:ok, first_root}
+
+    Dependencies.put(:generator, {:block, {:ok, "late subject"}})
+    {started, _request} = schedule(state, first_root)
+    assert_receive {:dependency_called, :generator, worker, "diff --git"}, @timeout
+
+    {switched, _registration} = EditorState.register_buffer(started, second, :open)
+    assert EditorAPI.git_root(switched) == {:ok, second_root}
+    send(worker, {:release_dependency, :generator})
+
+    {finished, outcome} = finish(switched)
+    assert outcome.value == {:stale, :repository_changed}
+    refute PromptUI.open?(finished)
+  end
+
   test "timeout stops the worker without admitting a duplicate", %{
     state: state,
     scheduler: scheduler
@@ -132,21 +158,30 @@ defmodule MingaGitExtended.Effects.CommitMessageGenerationTest do
     %{state | workspace: SessionState.set_file_tree(state.workspace, tree)}
   end
 
-  defp submit(state) do
+  defp repository_file(root) do
+    File.mkdir_p!(root)
+    path = Path.join(root, "current.txt")
+    File.write!(path, "tracked text\n")
+    :ok = Stub.set_root(root, root)
+    on_exit(fn -> Stub.clear(root) end)
+    start_supervised!(Supervisor.child_spec({Buffer, file_path: path}, id: root))
+  end
+
+  defp submit(state, root \\ @root) do
     assert {:ok, {:schedule, ^state, job}} =
              CallbackInvoker.invoke(
                @source,
                CommitMessageGeneration,
                :propose,
-               [state, @root, {Dependencies, Dependencies}],
+               [state, root, {Dependencies, Dependencies}],
                :command
              )
 
     RepositoryJob.submit(state, @source, job)
   end
 
-  defp schedule(state) do
-    state = submit(state)
+  defp schedule(state, root \\ @root) do
+    state = submit(state, root)
 
     assert_receive {:effect_lifecycle, %Outcome{value: :running, request: request} = outcome},
                    @timeout

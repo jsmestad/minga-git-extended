@@ -79,12 +79,38 @@ defmodule MingaGitExtended.CommandsDiffTest do
     view = EditorAPI.active_buffer(shown)
 
     assert {:ok,
-            %Target{origin: %Origin{staged: true}, contents: {@base, ""}, layout: :side_by_side}} =
+            %Target{origin: %Origin{staged: true}, contents: {@base, nil}, layout: :side_by_side}} =
              GitDiff.target(shown, view)
 
     blocked = Commands.execute(shown, :git_revert_hunk)
     assert NoticeWorkflow.message(blocked) == "Cannot revert from a staged diff view"
     assert Buffer.content(ctx.source) == @revised
+  end
+
+  test "an unmerged index cannot revert a previously displayed working hunk", ctx do
+    {state, _view} = open_view(ctx, :unified)
+    :ok = Stub.set_index_blob(ctx.root, @path, {:error, "Git index path is unmerged"})
+
+    updated = Commands.execute(state, :git_revert_hunk)
+
+    assert NoticeWorkflow.message(updated) =~ "unmerged"
+    assert Buffer.content(ctx.source) == @revised
+    assert File.read!(ctx.working_path) == @revised
+  end
+
+  test "recreating a deleted worktree path as an empty file invalidates its selected deletion",
+       ctx do
+    File.rm!(ctx.working_path)
+    origin = %Origin{git_root: ctx.root, rel_path: @path, staged: false}
+    {:ok, shown} = GitDiff.open(TestHelpers.gui_state(), origin, {@base, nil})
+    view = EditorAPI.active_buffer(shown)
+    File.write!(ctx.working_path, "")
+
+    updated = Commands.execute(shown, :git_stage_hunk)
+
+    assert NoticeWorkflow.message(updated) =~ "retry hunk action"
+    assert {:ok, @base} = Stub.show_staged(ctx.root, @path)
+    assert {:ok, %Target{contents: {@base, ""}}} = GitDiff.target(updated, view)
   end
 
   defp open_view(ctx, layout) do

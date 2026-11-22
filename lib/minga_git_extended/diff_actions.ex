@@ -41,7 +41,10 @@ defmodule MingaGitExtended.DiffActions do
         staged: false
       }
 
-      open(state, origin, {index_content(file.root, file.path), file.content})
+      case Git.index_blob(file.root, file.path) do
+        {:ok, indexed} -> open(state, origin, {indexed, file.content})
+        {:error, reason} -> EditorAPI.notice(state, "Could not open diff: #{reason}")
+      end
     end)
   end
 
@@ -105,12 +108,19 @@ defmodule MingaGitExtended.DiffActions do
 
   @impl true
   @spec run(String.t(), status_target()) :: {:ok, Target.contents()} | {:error, String.t()}
-  def run(root, {path, absolute_path, status, staged}) do
-    origin = %Origin{git_root: root, rel_path: path, staged: staged}
+  def run(root, {path, _absolute_path, _status, true}) do
+    with {:ok, indexed} <- Git.index_blob(root, path) do
+      {:ok, {head_content(root, path), indexed}}
+    end
+  end
 
-    with {:ok, current} <- status_content(origin, absolute_path, status) do
-      base = if staged, do: head_content(root, path), else: index_content(root, path)
-      {:ok, {base, current}}
+  def run(root, {path, absolute_path, _status, false}) do
+    with {:ok, indexed} <- Git.index_blob(root, path),
+         {:ok, current} <- read_worktree(absolute_path) do
+      {:ok, {indexed, current}}
+    else
+      {:error, reason} when is_atom(reason) -> {:error, "Could not read file: #{inspect(reason)}"}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -123,23 +133,6 @@ defmodule MingaGitExtended.DiffActions do
   def on_result(state, _root, {status, error}, _target) do
     message = if is_binary(error), do: error, else: inspect(error)
     EditorAPI.notice(state, "Git diff #{status}: #{message}")
-  end
-
-  @spec status_content(Origin.t(), String.t(), atom()) :: {:ok, binary()} | {:error, String.t()}
-  defp status_content(_origin, _absolute_path, :deleted), do: {:ok, ""}
-
-  defp status_content(%Origin{git_root: root, rel_path: path, staged: true}, _absolute, _status) do
-    case Git.show_staged(root, path) do
-      {:ok, content} -> {:ok, content}
-      :error -> {:error, "Could not read staged file: #{path}"}
-    end
-  end
-
-  defp status_content(_origin, absolute_path, _status) do
-    case File.read(absolute_path) do
-      {:ok, content} -> {:ok, content}
-      {:error, reason} -> {:error, "Could not read file: #{inspect(reason)}"}
-    end
   end
 
   @spec open(state(), Origin.t(), Target.contents()) :: state()
@@ -251,10 +244,11 @@ defmodule MingaGitExtended.DiffActions do
   end
 
   defp apply_source_action(state, buffer, :revert, file, change) do
-    reverted = Git.revert_change(file.content, change)
-
-    case Buffer.replace_content_if_version(buffer, file.version, reverted) do
-      {:ok, _new_version} -> EditorAPI.notice(state, "Hunk reverted")
+    with {:ok, _indexed} <- Git.index_blob(file.root, file.path),
+         reverted = Git.revert_change(file.content, change),
+         {:ok, _version} <- Buffer.replace_content_if_version(buffer, file.version, reverted) do
+      EditorAPI.notice(state, "Hunk reverted")
+    else
       {:error, :stale} -> EditorAPI.notice(state, "Source buffer changed; retry hunk action")
       {:error, reason} -> EditorAPI.notice(state, "Revert failed: #{inspect(reason)}")
     end
@@ -293,13 +287,13 @@ defmodule MingaGitExtended.DiffActions do
       target
 
     # Reverting this projection restores index content, so reject an out-of-date base.
-    with ^base <- index_content(origin.git_root, origin.rel_path),
+    with {:ok, ^base} <- Git.index_blob(origin.git_root, origin.rel_path),
          reverted = Git.revert_change(revised, hunk.change),
          {:ok, _new_version} <-
            Buffer.replace_content_if_version(origin.source_buffer, version, reverted) do
       replace(state, buffer, origin, "Hunk #{hunk.index}/#{hunk.total} reverted")
     else
-      different_base when is_binary(different_base) -> refresh_stale(state, buffer, origin)
+      {:ok, _changed} -> refresh_stale(state, buffer, origin)
       {:error, :stale} -> refresh_stale(state, buffer, origin)
       {:error, reason} -> EditorAPI.notice(state, "Revert failed: #{inspect(reason)}")
     end
@@ -308,7 +302,7 @@ defmodule MingaGitExtended.DiffActions do
       EditorAPI.notice(state, "Source buffer no longer available")
   end
 
-  @spec check_worktree(Origin.t(), binary()) :: :ok | :stale | {:error, String.t()}
+  @spec check_worktree(Origin.t(), binary() | nil) :: :ok | :stale | {:error, String.t()}
   defp check_worktree(%Origin{source_buffer: nil} = origin, revised) do
     case working_content(origin) do
       {:ok, ^revised} -> :ok
@@ -381,22 +375,21 @@ defmodule MingaGitExtended.DiffActions do
 
   @spec current_contents(Origin.t()) :: {:ok, Target.contents()} | {:error, term()}
   defp current_contents(%Origin{git_root: root, rel_path: path, staged: true}) do
-    {:ok, {head_content(root, path), index_content(root, path)}}
+    with {:ok, indexed} <- Git.index_blob(root, path) do
+      {:ok, {head_content(root, path), indexed}}
+    end
   end
 
   defp current_contents(%Origin{git_root: root, rel_path: path} = origin) do
-    with {:ok, working} <- working_content(origin) do
-      {:ok, {index_content(root, path), working}}
+    with {:ok, indexed} <- Git.index_blob(root, path),
+         {:ok, working} <- working_content(origin) do
+      {:ok, {indexed, working}}
     end
   end
 
-  @spec working_content(Origin.t()) :: {:ok, binary()} | {:error, term()}
-  defp working_content(%Origin{source_buffer: nil, git_root: root, rel_path: path}) do
-    case File.read(Path.join(root, path)) do
-      {:error, :enoent} -> {:ok, ""}
-      result -> result
-    end
-  end
+  @spec working_content(Origin.t()) :: {:ok, binary() | nil} | {:error, term()}
+  defp working_content(%Origin{source_buffer: nil, git_root: root, rel_path: path}),
+    do: read_worktree(Path.join(root, path))
 
   defp working_content(%Origin{source_buffer: buffer}) do
     {:ok, Buffer.content(buffer)}
@@ -405,19 +398,19 @@ defmodule MingaGitExtended.DiffActions do
       {:error, :closed_source}
   end
 
-  @spec head_content(String.t(), String.t()) :: binary()
+  @spec head_content(String.t(), String.t()) :: binary() | nil
   defp head_content(root, path) do
     case Git.show_head(root, path) do
       {:ok, content} -> content
-      :error -> ""
+      :error -> nil
     end
   end
 
-  @spec index_content(String.t(), String.t()) :: binary()
-  defp index_content(root, path) do
-    case Git.show_staged(root, path) do
-      {:ok, content} -> content
-      :error -> ""
+  @spec read_worktree(String.t()) :: {:ok, binary() | nil} | {:error, File.posix()}
+  defp read_worktree(path) do
+    case File.read(path) do
+      {:error, :enoent} -> {:ok, nil}
+      result -> result
     end
   end
 
