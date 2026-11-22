@@ -406,11 +406,14 @@ defmodule MingaGitExtended.DiffActions do
     end
   end
 
-  @spec read_worktree(String.t()) :: {:ok, binary() | nil} | {:error, File.posix()}
+  @spec read_worktree(String.t()) ::
+          {:ok, binary() | nil} | {:error, File.posix() | :not_regular_file}
   defp read_worktree(path) do
-    case File.read(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :regular}} -> File.read(path)
+      {:ok, _stat} -> {:error, :not_regular_file}
       {:error, :enoent} -> {:ok, nil}
-      result -> result
+      {:error, _reason} = error -> error
     end
   end
 

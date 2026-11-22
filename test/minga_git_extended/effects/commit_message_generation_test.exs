@@ -132,6 +132,11 @@ defmodule MingaGitExtended.Effects.CommitMessageGenerationTest do
     {finished, outcome} = finish(switched)
     assert outcome.value == {:stale, :repository_changed}
     refute PromptUI.open?(finished)
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(finished) ==
+             "Commit message result ignored after repository changed"
+
+    assert RepositoryJob.render?(outcome)
   end
 
   test "timeout stops the worker without admitting a duplicate", %{
