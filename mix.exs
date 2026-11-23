@@ -40,7 +40,7 @@ defmodule MingaGitExtended.MixProject do
   defp deps(_env) do
     sdk =
       case System.get_env("MINGA_SDK_PATH") do
-        nil -> {:minga_sdk, "~> 0.1.1", only: :dev, runtime: false}
+        nil -> {:minga_sdk, "~> 0.1.2", only: :dev, runtime: false}
         path -> {:minga_sdk, path: Path.expand(path), only: :dev, runtime: false}
       end
 
