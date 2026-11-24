@@ -6,7 +6,7 @@ defmodule MingaGitExtended.MixProject do
   def project do
     [
       app: :minga_git_extended,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.20",
       start_permanent: false,
       deps: deps(Mix.env()),
