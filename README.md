@@ -10,9 +10,9 @@ Use a Minga build with the source-owned Git workflow APIs from SDK 0.1.1. Add th
 extension :minga_git_extended, git: "https://github.com/jsmestad/minga-git-extended"
 ```
 
-Open a file in a Git repository and press `SPC g g` to open Git Status. In the terminal, use `j` and `k` to select a row and `p` to preview its diff. On macOS, right-click a file in the sidebar and choose **Open Diff**. Use the **Stage hunk** command to stage only the selected change.
+Open a file in a Git repository and press `SPC g g` to open Git Status. In the terminal, use `j` and `k` to select a row and `p` to preview its diff. On macOS, right-click a file in the sidebar and choose **Open Diff**. Press `SPC g s` (**Stage hunk**) to stage only the change under the cursor.
 
-`SPC g f` opens the changed-file picker, `SPC g l` opens the log, and `SPC g B` opens the branch picker. Remove the configuration line and restart to disable GitExtended.
+`SPC g f` opens the changed-file picker, `SPC g l` opens the log, `SPC g b` switches branch, and `SPC g B` shows blame for the current line. These keys follow Minga's [key design](https://github.com/jsmestad/minga/blob/main/docs/design/keys.md). Staging the whole file has no leader key; run the **Stage current file** command from the command palette. Remove the configuration line and restart to disable GitExtended.
 
 ## Develop
 
