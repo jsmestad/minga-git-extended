@@ -204,7 +204,7 @@ defmodule MingaGitExtended do
   def description, do: "GitExtended"
 
   @impl true
-  def version, do: "0.1.0"
+  def version, do: "0.1.1"
 
   @impl true
   def init(_config) do

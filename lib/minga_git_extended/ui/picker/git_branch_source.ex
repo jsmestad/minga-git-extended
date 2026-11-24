@@ -50,13 +50,6 @@ defmodule MingaGitExtended.UI.Picker.GitBranchSource do
   def actions(_item, _root), do: []
 
   @impl true
-  @spec shortcut_action(Item.t(), Source.shortcut(), args()) :: :delete | nil
-  def shortcut_action(%Item{id: {:branch, _name, _current?, false}}, {:ctrl, ?d}, _root),
-    do: :delete
-
-  def shortcut_action(_item, _shortcut, _root), do: nil
-
-  @impl true
   @spec on_action(EditorAPI.state(), :delete, Item.t(), args()) :: EditorAPI.state()
   def on_action(state, :delete, %Item{id: {:branch, _name, true, false}}, _root),
     do: EditorAPI.notice(state, "Cannot delete current branch")
