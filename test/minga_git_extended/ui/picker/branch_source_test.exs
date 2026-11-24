@@ -21,12 +21,12 @@ defmodule MingaGitExtended.UI.Picker.GitBranchSourceTest do
     assert GitBranchSource.actions(remote, "/repo") == []
   end
 
-  test "Ctrl-D offers delete for a local branch but never for a remote branch" do
+  test "the act menu offers delete for a local branch but never for a remote branch" do
     local = %Item{id: {:branch, "feature", false, false}, label: "feature"}
     remote = %Item{id: {:branch, "origin/feature", false, true}, label: "origin/feature"}
 
-    assert GitBranchSource.shortcut_action(local, {:ctrl, ?d}, "/repo") == :delete
-    assert GitBranchSource.shortcut_action(remote, {:ctrl, ?d}, "/repo") == nil
+    assert GitBranchSource.actions(local, "/repo") == [{"Delete", :delete}]
+    assert GitBranchSource.actions(remote, "/repo") == []
   end
 
   test "delete action on current branch reports an error without entering confirmation" do
