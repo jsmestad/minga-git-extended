@@ -22,7 +22,6 @@ defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
   alias MingaGitExtended.Commands
 
   @source {:extension, :minga_git_extended}
-  @admission Module.concat(__MODULE__, Admission)
   @none 0
   @effect_timeout 1_000
   @moduletag :tmp_dir
@@ -201,20 +200,20 @@ defmodule MingaGitExtended.Input.GitStatusDiffOpenTest do
     callback = MingaGitExtended.Commands
     modules = [callback, MingaGitExtended.DiffActions]
     fingerprint = :crypto.hash(:sha256, Atom.to_string(callback))
-    start_supervised!({ArtifactAdmission, name: @admission})
+    admission = start_supervised!({ArtifactAdmission, name: nil})
 
     {:ok, claim} =
       ArtifactAdmission.claim_source_modules(@source, modules, fingerprint,
-        server: @admission,
+        server: admission,
         trusted_application: :minga_git_extended
       )
 
-    :ok = ArtifactAdmission.commit_attempt(claim, server: @admission)
+    :ok = ArtifactAdmission.commit_attempt(claim, server: admission)
     :ok = CodeLease.activate_source(@source, modules)
 
     :ok =
       CallbackRegistry.register_extension(:minga_git_extended, [{callback, [:editor_action], []}],
-        artifact_admission: @admission
+        artifact_admission: admission
       )
 
     on_exit(fn ->
