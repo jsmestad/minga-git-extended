@@ -301,18 +301,21 @@ defmodule MingaGitExtended.LifecycleTest do
   defp assert_git_extended_contributions_registered(ctx) do
     assert {:ok, _command} = CommandRegistry.lookup(ctx.command_registry, :git_status_toggle)
     assert {:ok, _command} = CommandRegistry.lookup(ctx.command_registry, :git_blame_line)
-    assert {:command, :git_status_toggle, _description} = lookup_git_status_keybind(ctx.keymap)
+    assert {:command, :git_status_toggle, _description} = lookup_leader(ctx.keymap, "g g")
+    assert {:command, :git_branch_picker, _description} = lookup_leader(ctx.keymap, "g b")
+    assert {:command, :git_blame_line, _description} = lookup_leader(ctx.keymap, "g B")
+    assert {:command, :git_stage_hunk, _description} = lookup_leader(ctx.keymap, "g s")
     assert %{semantic_kind: "git_status", source: @source} = Sidebar.get("git_status")
   end
 
   defp assert_git_extended_contributions_removed(ctx) do
     assert :error = CommandRegistry.lookup(ctx.command_registry, :git_status_toggle)
-    assert :not_found = lookup_git_status_keybind(ctx.keymap)
+    assert :not_found = lookup_leader(ctx.keymap, "g g")
     assert Sidebar.get("git_status") == nil
   end
 
-  defp lookup_git_status_keybind(keymap) do
-    {:ok, keys} = KeyParser.parse("g g")
+  defp lookup_leader(keymap, sequence) do
+    {:ok, keys} = KeyParser.parse(sequence)
 
     keymap
     |> ActiveKeymap.leader_trie()
